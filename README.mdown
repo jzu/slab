@@ -24,9 +24,10 @@ TESTING
 
 Running it as root allows to use the Slug's LEDs.
 
-This program needs an USB joystick - or something similar - to operate.
-It currently manages two potentiometers and four switches, but there's
-room for easy expansion.
+This program needs an USB joystick - or something similar - to operate. It
+currently manages two potentiometers and four switches, but there's room for
+easy expansion. You will need to tinker with #include's to map the physical
+controls with the desired effects.
 
 The `-d` option ouputs debug messages (ALSA errors and joystick events).
 
