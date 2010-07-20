@@ -24,10 +24,10 @@ TESTING
 
 Running it as root allows to use the Slug's LEDs.
 
-This program needs an USB joystick - or something similar - to operate. It
-currently manages two potentiometers and four switches, but there's room for
-easy expansion. You will need to tinker with `#include`s to map the physical
-controls with the desired effects.
+This program needs an USB joystick - or something similar, like a converted wah
+controller - to operate. It currently manages two potentiometers and four
+switches, but there's room for easy expansion. You will need to tinker with
+`#include`s to map the physical controls with the desired effects.
 
 The `-d` option ouputs debug messages (ALSA errors and joystick events).
 
@@ -48,14 +48,20 @@ which will ensure that `init(8)` restarts the program when it is stopped.
 CAVEAT
 ------
 
-Enormous hiss! The "noise gate" effect helps only to a point.
+Enormous hiss! The el-cheapo USB soundcard I used for my tests is to 
+blame. The "noise gate" effect helps only to a point.
+
+When the program starts, it doesn't know the position of pots, since they 
+cannot be read: events are pushed from the controller to the computer. 
+Since this kind of device is seldom restarted during a session, this
+behaviour is minor, but sometimes surprising.
 
 Any external process/event affects ALSA management and creates an 
 unwanted delay. You have to stop the program, which will be restarted
 by init if `/etc/inittab` is set up accordingly.
 
 Hence, Debian is perfect for programming/compiling/debugging, but 
-another distro might be more adequate for everyday use.
+a stripped-down distro might be more adequate for everyday use.
 See OpenEmbedded (http://wiki.openembedded.net/) and others.
 
 
