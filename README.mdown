@@ -9,7 +9,7 @@ Copyright (C) Jean Zundel <jzu@free.fr> 2010
 
 slab is an evolutive guitar effect designed for the Linksys NSLU2 running
 GNU/Linux, but it works on any ALSA-based architecture. It is licensed under
-the GPL v3.
+the GNU GPL v3.
 
 
 COMPILATION
@@ -26,7 +26,7 @@ Running it as root allows to use the Slug's LEDs.
 
 This program needs an USB joystick - or something similar - to operate. It
 currently manages two potentiometers and four switches, but there's room for
-easy expansion. You will need to tinker with #include's to map the physical
+easy expansion. You will need to tinker with `#include`s to map the physical
 controls with the desired effects.
 
 The `-d` option ouputs debug messages (ALSA errors and joystick events).
@@ -35,7 +35,7 @@ The `-d` option ouputs debug messages (ALSA errors and joystick events).
 RUNNING
 -------
 
-Once you're all set, you want to edit /etc/inittab to insert this line:
+Once you're all set, you want to edit `/etc/inittab` to insert this line:
 
 `sl:23:respawn:/[PATH_TO]/slab`
 
