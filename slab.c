@@ -9,28 +9,7 @@
  * slab is an evolutive guitar effect designed for the Linksys NSLU2 running 
  * GNU/Linux, but it works on any ALSA-based architecture.
  *
- * COMPILATION
  *  gcc slab.c -Wall -g -lasound -lpthread -o slab
- * You'll need libasound2 and libpthread libraries (+devel), and gcc.
- *
- * TESTING
- * Running it as root allows to use the Slug's LEDs.
- * This program needs an USB joystick - or something similar - to operate.
- * It currently manages two potentiometers and four switches, but there's
- * room for easy expansion.
- * The -d option ouputs debug messages (ALSA errors and joystick events).
- * 
- * RUNNING
- * Once you're all set, you want to edit /etc/inittab to insert this line:
- * sl:23:respawn:/[PATH_TO]/slab
- * (obviously replacing [PATH_TO] with its actual path)
- * which will ensure that init(8) restarts the program when it is stopped.
- * 
- * CAVEAT
- * Enormous hiss! The "noise gate" effect helps only to a point.
- * Any external process/event affects ALSA management and creates an 
- * unwanted delay. You have to stop the program, which will be restarted
- * by init if /etc/inittab is set up accordingly.
  * 
  *
  * This program is free software: you can redistribute it and/or modify
@@ -43,7 +22,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * $Id: slab.c,v 1.7 2010/07/18 15:13:53 slug Exp $
  ****************************************************************************/
 
 #define ALSA_PCM_NEW_HW_PARAMS_API
