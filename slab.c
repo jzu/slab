@@ -117,11 +117,9 @@ int main (int argc, char **argv) {
   int spl;                           // Sample offset in a mono frame
   int fl_val = 1000;                 // Delay effect needs "integrated"
                                      // joystick variations
-  snd_pcm_hw_params_t *params_rec,
-                      *params_play;
   int gate;                          // Noise detector
-  int dir;                           // Result for ALSA operations
-  unsigned int val;                  // Sample frequency
+  unsigned int rate = 44100;         // Sample rate
+
 
   int s = 0;
 
@@ -154,7 +152,6 @@ int main (int argc, char **argv) {
   // ALSA init
 
   asize = frames * 4;                // 2 bytes/sample, 2 channels 
-  val  = 44100;                      // Should be 48k here, which doesn't work
 
   recbuf  = (short *)malloc (asize);
   playbuf = (short *)malloc (asize);
@@ -167,35 +164,17 @@ int main (int argc, char **argv) {
            "rec - unable to open pcm device: %s\n", snd_strerror(rc));
     exit (1);
   }
-
-  /* Allocate a hardware parameters object. 
-   * Fill it in with default values.
-   * Set the desired hardware parameters: 
-   *  Interleaved mode 
-   *  Signed 16-bit little-endian format
-   *  Two channels (stereo) 
-   *  44100 bits/second sampling rate (CD quality) 
-   *  Set period size to 44 frames. (?)
-   * Write the parameters to the driver. */
-
-  snd_pcm_hw_params_alloca (&params_rec);
-  snd_pcm_hw_params_any (handle_rec, 
-                         params_rec);
-  snd_pcm_hw_params_set_access (handle_rec, params_rec,
-                                SND_PCM_ACCESS_RW_INTERLEAVED);
-  snd_pcm_hw_params_set_format (handle_rec, params_rec,
-                                SND_PCM_FORMAT_S16_LE);
-  snd_pcm_hw_params_set_channels (handle_rec, params_rec, 2);
-  snd_pcm_hw_params_set_rate_near (handle_rec, params_rec, &val, &dir);
-  snd_pcm_hw_params_set_period_size_near (handle_rec, params_rec, &frames, 
-                                          &dir);
-  rc = snd_pcm_hw_params (handle_rec, params_rec);
-  if (rc < 0) {
+  if ((rc = snd_pcm_set_params (handle_rec,
+                                SND_PCM_FORMAT_S16_LE,
+                                SND_PCM_ACCESS_RW_INTERLEAVED,
+                                2,                               // Stereo
+                                rate,
+                                1,                               // Resample
+                                80000)) < 0) {                   // 0.08 sec 
     ERROR (stderr,
            "rec - unable to set hw parameters: %s\n", snd_strerror (rc));
-    exit (1);
+    exit (EXIT_FAILURE);
   }
-  snd_pcm_hw_params_get_period_size (params_rec, &frames, &dir);
 
 
   /* PCM playback setup */
@@ -207,24 +186,17 @@ int main (int argc, char **argv) {
              snd_strerror (rc));
     exit (1);
   }
-
-  snd_pcm_hw_params_alloca (&params_play);
-  snd_pcm_hw_params_any (handle_play, params_play);
-  snd_pcm_hw_params_set_access (handle_play, params_play,
-                                SND_PCM_ACCESS_RW_INTERLEAVED);
-  snd_pcm_hw_params_set_format (handle_play, params_play,
-                                SND_PCM_FORMAT_S16_LE);
-  snd_pcm_hw_params_set_channels (handle_play, params_play, 2);
-  snd_pcm_hw_params_set_rate_near (handle_play, params_play, &val, &dir);
-  snd_pcm_hw_params_set_period_size_near (handle_play, params_play, &frames, 
-                                          &dir);
-  rc = snd_pcm_hw_params (handle_play, params_play);
-  if (rc < 0) {
+  if ((rc = snd_pcm_set_params (handle_play,
+                                SND_PCM_FORMAT_S16_LE,
+                                SND_PCM_ACCESS_RW_INTERLEAVED,
+                                2,                               // Stereo
+                                rate,
+                                1,                               // Resample
+                                80000)) < 0) {                   // 0.08 sec
     ERROR (stderr,
            "play - unable to set hw parameters: %s\n", snd_strerror (rc));
     exit(1);
   }
-  snd_pcm_hw_params_get_period_size (params_play, &frames, &dir);
 
   bsize = asize / 2;                 // Stereo (alsa) -> Mono (bytes)
   ssize = bsize / 2;                 // Bytes -> Samples
@@ -333,7 +305,6 @@ int main (int argc, char **argv) {
              "short write, write %d frames\n", rc);
     }
   }
-
   return 0;
 }
 
