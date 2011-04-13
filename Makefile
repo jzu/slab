@@ -3,4 +3,7 @@
 #
 
 slab: slab.c
-	gcc -Wall -g -lasound -lpthread -o $@ $<
+	gcc -Wall -g -lasound -lpthread -lm -o $@ $<
+
+clean:
+	/bin/rm slab

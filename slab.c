@@ -37,6 +37,7 @@
 #include <math.h>
 #include <signal.h>
 
+#define FRAMES 44      /* Don't ask */
 
 #define INITIAL_LENGTH 0x100000
 
@@ -85,7 +86,7 @@ int   debug = 0;
 
 pthread_t thread;                    // Joystick thread
 
-snd_pcm_uframes_t frames = 44;
+snd_pcm_uframes_t frames = FRAMES;
 snd_pcm_t *handle_rec,
           *handle_play;
 short   *recbuf,                     // ALSA I/O buffers

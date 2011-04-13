@@ -1,0 +1,4 @@
+- Create another input thread to handle STDIN
+- Test different soundcards: Behringer UFO202 and others
+- Test on a DockStar
+- Write a shimmer reverb effect using fix_fft.c
