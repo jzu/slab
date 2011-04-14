@@ -1,3 +1,5 @@
+- Write a shimmer reverb effect, FFT being handled by a thread
+- Gracefully handle errors while opening /dev/js0 
 - Create another input thread to handle STDIN
 - Test different soundcards: Behringer UFO202 and others
 - Test on a DockStar
