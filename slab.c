@@ -341,7 +341,9 @@ void *joystick ()
   struct js_event ev;
   struct js_event oldev; // FIXME should disappear when new converter arrives
 
-  jfd = open ("/dev/input/js0", O_RDONLY);
+  while ((jfd = open ("/dev/input/js0", O_RDONLY)) <= 0) {
+    sleep (30);
+  }
 
   while (1) {
     if (read (jfd, &ev, sizeof (ev)) > 0) {
