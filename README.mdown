@@ -44,6 +44,23 @@ which will ensure that `init(8)` restarts the program when it is stopped.
 
 `telinit q` will re-read the inittab file.
 
+Mounting the `/` filesystem read-only prevents data corruption, but you have to
+create ramdisks for `/tmp` and `/var/run` directories in `/etc/fstab`.
+
+    /dev/sda2  /         ext3    ro         0 0
+    (...)
+    none       /tmp      ramfs   size=512k  0 0
+    none       /var/run  ramfs   size=512k  0 0
+
+Activating eth0 mysteriously fails with readonly filesystems, so 
+this kludge in `/etc/rc.local` temporarily switches to `rw`,
+`ifconfig`s eth0, then switches back to `ro`.
+
+    mount /dev/sda2 / -o rw,remount
+    ifconfig eth0 192.168.0.106
+    sleep 1                         # Yes, you really need it. Whatever.
+    mount /dev/sda2 / -o ro,remount
+
 
 CAVEAT
 ------
