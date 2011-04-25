@@ -10,7 +10,7 @@
  * GNU/Linux, but it works on any ALSA-based architecture.
  *
  *  gcc slab.c -Wall -g -lasound -lpthread -o slab
- * 
+ *
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -37,7 +37,7 @@
 #include <math.h>
 #include <signal.h>
 
-#define FRAMES 44      /* Don't ask */
+#define FRAMES 44                            /* Don't ask */
 
 #define INITIAL_LENGTH 0x100000
 
@@ -118,9 +118,12 @@ int main (int argc, char **argv) {
   int spl;                           // Sample offset in a mono frame
   int fl_val = 1000;                 // Delay effect needs "integrated"
                                      // joystick variations
+  snd_pcm_hw_params_t *params_rec,
+                      *params_play;
   int gate;                          // Noise detector
+//  int dir;                           // Result for ALSA operations
   unsigned int rate = 44100;         // Sample rate
-
+//  unsigned int val;                  // Sample frequency
 
   int s = 0;
 
@@ -153,51 +156,83 @@ int main (int argc, char **argv) {
   // ALSA init
 
   asize = frames * 4;                // 2 bytes/sample, 2 channels 
+//  val  = 44100;                      // Should be 48k here, which doesn't work
 
   recbuf  = (short *)malloc (asize);
   playbuf = (short *)malloc (asize);
 
   /* PCM capture setup */
 
-  rc = snd_pcm_open (&handle_rec, "plughw:0", SND_PCM_STREAM_CAPTURE, 0);
+  rc = snd_pcm_open (&handle_rec, 
+                     "plughw:0", 
+                     SND_PCM_STREAM_CAPTURE, 
+                     0);
   if (rc < 0) {
     ERROR (stderr,
            "rec - unable to open pcm device: %s\n", snd_strerror(rc));
-    exit (1);
+    exit (EXIT_FAILURE);
   }
-  if ((rc = snd_pcm_set_params (handle_rec,
-                                SND_PCM_FORMAT_S16_LE,
-                                SND_PCM_ACCESS_RW_INTERLEAVED,
-                                2,                               // Stereo
-                                rate,
-                                1,                               // Resample
-                                80000)) < 0) {                   // 0.08 sec 
+
+  /* Allocate a hardware parameters object. 
+   * Fill it in with default values.
+   * Set the desired hardware parameters: 
+   *  Interleaved mode 
+   *  Signed 16-bit little-endian format
+   *  Two channels (stereo) 
+   *  44100 bits/second sampling rate (CD quality) 
+   *  Set period size to 44 frames. (?)
+   * Write the parameters to the driver. */
+
+  snd_pcm_hw_params_alloca (&params_rec);
+  snd_pcm_hw_params_any (handle_rec, 
+                         params_rec);
+  snd_pcm_hw_params_set_access (handle_rec, params_rec,
+                                SND_PCM_ACCESS_RW_INTERLEAVED);
+  snd_pcm_hw_params_set_format (handle_rec, params_rec,
+                                SND_PCM_FORMAT_S16_LE);
+  snd_pcm_hw_params_set_channels (handle_rec, params_rec, 2);
+  snd_pcm_hw_params_set_rate_near (handle_rec, params_rec, &rate, &rc);
+  snd_pcm_hw_params_set_period_size_near (handle_rec, params_rec, &frames, 
+                                          &rc);
+  rc = snd_pcm_hw_params (handle_rec, params_rec);
+  if (rc < 0) {
     ERROR (stderr,
            "rec - unable to set hw parameters: %s\n", snd_strerror (rc));
     exit (EXIT_FAILURE);
   }
+  snd_pcm_hw_params_get_period_size (params_rec, &frames, &rc);
 
 
   /* PCM playback setup */
 
-  rc = snd_pcm_open (&handle_play, "plughw:0", SND_PCM_STREAM_PLAYBACK, 0);
+  rc = snd_pcm_open (&handle_play, 
+                     "plughw:0", 
+                     SND_PCM_STREAM_PLAYBACK, 
+                     0);
   if (rc < 0) {
     ERROR (stderr,
            "play - unable to open pcm device: %s\n",
              snd_strerror (rc));
     exit (1);
   }
-  if ((rc = snd_pcm_set_params (handle_play,
-                                SND_PCM_FORMAT_S16_LE,
-                                SND_PCM_ACCESS_RW_INTERLEAVED,
-                                2,                               // Stereo
-                                rate,
-                                1,                               // Resample
-                                80000)) < 0) {                   // 0.08 sec
+
+  snd_pcm_hw_params_alloca (&params_play);
+  snd_pcm_hw_params_any (handle_play, params_play);
+  snd_pcm_hw_params_set_access (handle_play, params_play,
+                                SND_PCM_ACCESS_RW_INTERLEAVED);
+  snd_pcm_hw_params_set_format (handle_play, params_play,
+                                SND_PCM_FORMAT_S16_LE);
+  snd_pcm_hw_params_set_channels (handle_play, params_play, 2);
+  snd_pcm_hw_params_set_rate_near (handle_play, params_play, &rate, &rc);
+  snd_pcm_hw_params_set_period_size_near (handle_play, params_play, &frames, 
+                                          &rc);
+  rc = snd_pcm_hw_params (handle_play, params_play);
+  if (rc < 0) {
     ERROR (stderr,
            "play - unable to set hw parameters: %s\n", snd_strerror (rc));
     exit(1);
   }
+  snd_pcm_hw_params_get_period_size (params_play, &frames, &rc);
 
   bsize = asize / 2;                 // Stereo (alsa) -> Mono (bytes)
   ssize = bsize / 2;                 // Bytes -> Samples
@@ -251,7 +286,7 @@ int main (int argc, char **argv) {
         gate = 0;           // Don't attenuate the buffer if there's a signal
     if (gate)
       for (spl = 0; spl < ssize; spl++)
-        procbuf [s + spl] = procbuf [s + spl] >> 0;
+        procbuf [s + spl] = procbuf [s + spl] >> 1;
 
     // 2) distortion - apply a non-linear function to signal
 
@@ -306,6 +341,7 @@ int main (int argc, char **argv) {
              "short write, write %d frames\n", rc);
     }
   }
+
   return 0;
 }
 
@@ -341,9 +377,8 @@ void *joystick ()
   struct js_event ev;
   struct js_event oldev; // FIXME should disappear when new converter arrives
 
-  while ((jfd = open ("/dev/input/js0", O_RDONLY)) <= 0) {
+  while ((jfd = open ("/dev/input/js0", O_RDONLY)) <= 0)
     sleep (30);
-  }
 
   while (1) {
     if (read (jfd, &ev, sizeof (ev)) > 0) {
