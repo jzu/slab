@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <alsa/asoundlib.h>
 #include <linux/joystick.h>
@@ -37,12 +38,21 @@
 #include <math.h>
 #include <signal.h>
 
-#define FRAMES 44                            /* Don't ask */
+#include "fix_fft.h"
+
+#define FRAMES 44        /* Don't ask */
 
 #define INITIAL_LENGTH 0x100000
 
 #define DEBUG if (debug) printf
 #define ERROR if (debug) fprintf
+
+// Shimmer/FFT
+
+#define HALFLEN (N_WAVE>>1)
+#define DECAY 500
+#define LSHFT 7         /* More precision */
+#define RSHFT 10        /* Back, compensating for successive additions */
 
 // Switches
 
@@ -81,17 +91,25 @@ int   asize,                         // ALSA stereo buffer size
       buflen;
 
 int   joydis,
-      joymod = 1000;                         // Values read by joystick()
+      joymod = 1000;                 // Values read by joystick()
 int   debug = 0;
 
-pthread_t thread;                    // Joystick thread
+pthread_t jthread;                   // Joystick thread
+pthread_t sthread;                   // Joystick thread
 
 snd_pcm_uframes_t frames = FRAMES;
 snd_pcm_t *handle_rec,
           *handle_play;
-short   *recbuf,                     // ALSA I/O buffers
-        *playbuf;
+short *recbuf,                       // ALSA I/O buffers
+      *playbuf;
 
+long  shimbuf [N_WAVE];              // Mix buffer
+int   shidx = 0;                     // Index in a buffer
+
+int   spl;                           // Sample offset in a mono frame
+int   s = 0;                         // Frame offset in procbuf
+
+int   shimmer_flag=1;
 int   flange_flag=0;
 int   delay_flag=0;
 int   dist_flag=0;
@@ -99,6 +117,7 @@ int   dist_flag=0;
 void  swapbufs ();
 short get_sample (short *p);
 void  *joystick ();
+void  *shimmer ();
 void  set_led (char *led, int i);
 short push_pull (short sample);
 void  debugsig (int signum);
@@ -115,7 +134,6 @@ int main (int argc, char **argv) {
 
   int i, d;
   int rc;
-  int spl;                           // Sample offset in a mono frame
   int fl_val = 1000;                 // Delay effect needs "integrated"
                                      // joystick variations
   snd_pcm_hw_params_t *params_rec,
@@ -125,7 +143,6 @@ int main (int argc, char **argv) {
   unsigned int rate = 44100;         // Sample rate
 //  unsigned int val;                  // Sample frequency
 
-  int s = 0;
 
   if ((argc > 1) && (!strcmp(argv[1], "-d")))
     debug = 1;
@@ -145,7 +162,8 @@ int main (int argc, char **argv) {
 
   /* Let the joystick live its life */
 
-  pthread_create (&thread, NULL, joystick, NULL);
+  pthread_create (&jthread, NULL, joystick, NULL);
+  pthread_create (&sthread, NULL, shimmer, NULL);
 
   signal (SIGINT, debugsig);
 
@@ -290,7 +308,7 @@ int main (int argc, char **argv) {
 
     // 2) distortion - apply a non-linear function to signal
 
-//    if (dist_flag)
+    if (dist_flag)
       joydis = (joydis < 0) ? 0 : (joydis > 4) ? 4 : joydis;
       for (spl = 0; spl < ssize; spl++)
         for (d = 0; d < joydis ; d++)
@@ -316,12 +334,17 @@ int main (int argc, char **argv) {
                  (int)(get_sample (procbuf+s + spl - joymod*50) >> 1))/1.5);
 
 
-    /* Back to stereo */
+    /* Back to stereo - Shimmer generator integrated here */
 
-    for (i = 0; i < ssize; i++) {
-      playbuf [i*2] = procbuf [s+i];
-      playbuf [i*2+1] = procbuf [s+i];
-    }
+    for (i = 0; i < ssize; i++)
+      if (shimmer_flag)
+        playbuf [i*2]   = 
+        playbuf [i*2+1] = procbuf [s+i] 
+                          + (short)(shimbuf [(shidx > N_WAVE)
+                                             ? shidx = 0
+                                             : shidx++] >> RSHFT);
+      else
+        playbuf [i*2] = playbuf [i*2+1] = procbuf [s+i];
 
     /* Write playback buffer content to device */
 
@@ -361,6 +384,80 @@ short get_sample (short *p) {
   while ((int)p >= (int)(procbuf+buflen))
     p -= buflen;
   return *p;
+}
+
+
+/**************************************************************************** 
+ * shimmer()
+ *
+ * Separate thread
+ * Integer FFT and filtering 
+ * shimbuf[] contains the processed signal, shifted in longs for precision
+ * A time-domain aliasing cancellation mechanism using overlapping triangle 
+ * windows and triple buffering prevents clicks and flattens the envelope
+ ****************************************************************************/
+
+void *shimmer ()
+{
+  short realbuf [3][N_WAVE];           // FFT buffers (new, old, older)
+  short *pr [4];                       // Ptrs to realbuf[], 3 really used
+  short imagbuf [N_WAVE];              // Always zeroed, never used
+  int   i,
+        max,
+        min;
+
+  pr [0] = realbuf [0];                // New - receives data from procbuf
+  pr [1] = realbuf [1];                // Old
+  pr [2] = realbuf [2];                // Older
+
+  while (1) {
+    if (shimmer_flag) {
+      memset (imagbuf, 0, N_WAVE*2);
+  
+      for (i = 0; i < N_WAVE; i++)                      // Copy data
+        pr [0][i] = procbuf [(s + spl - N_WAVE + i < 0)
+                             ? s + spl - N_WAVE + i + INITIAL_LENGTH
+                             : s + spl - N_WAVE + i];
+
+      fix_fft (pr [0], imagbuf, 0, LOG2_N_WAVE);        // Integer FFT
+
+      for (i = 1, max = 0; i < N_WAVE/2; i++)           // Find max in freqs
+        if (abs (pr [0][i]) > max)
+          max = abs (pr [0][i]);
+      min = max / 4;
+
+      for (i = N_WAVE/4 - 1; i > 0; i--) {
+        if (pr [0][i] < min)                            // Ditch low values
+          pr [0][i] = 0;
+        pr [0][i*2] = pr [2][i];                        // Octave(s) up
+        pr [0][i*4] = pr [2][i];
+        pr [0][i] = 0;                                  // Fundamental off
+      }
+      for (i = 1; i < N_WAVE/2; i++)                    // Mirror frequencies
+        pr [0][N_WAVE-i] = pr [0][i];                   // with a twist -
+                                                        // should be N_WAVE-i-1
+
+      fix_fft (pr [0], imagbuf, 1, LOG2_N_WAVE);        // Reverse FFT
+  
+      for (i = 0; i < HALFLEN; i++)                     // TDAC (left half)
+        shimbuf [i] = (shimbuf [i] * (DECAY-1)) / DECAY
+                      + (1 << LSHFT) - (i << LSHFT) / HALFLEN
+                      + ((long)(pr [2][i+HALFLEN]) << LSHFT)
+                      + ((i << LSHFT) / HALFLEN)
+                      + ((long)(pr [1][i]) << LSHFT);
+      for (i = HALFLEN; i < N_WAVE; i++)                // TDAC (right half)
+        shimbuf [i] = (shimbuf [i] * (DECAY-1)) / DECAY
+                      + (2 << LSHFT) - (i << LSHFT) / HALFLEN 
+                      + ((long)(pr [1][i]) << LSHFT)
+                      + ((i << LSHFT) / HALFLEN - (1 << LSHFT))
+                      + ((long)(pr [0][i-HALFLEN]) << LSHFT);
+
+     pr [1] = pr [0];                                   // Let's roll
+     pr [2] = pr [1];
+     pr [3] = pr [2];
+     pr [0] = pr [3];
+    }
+  }
 }
 
 
@@ -509,8 +606,8 @@ void debugsig (int signum) {
   snd_pcm_drain (handle_play);
   snd_pcm_close (handle_play);
 */
-  free (recbuf);
-  free (playbuf);
+//  free (recbuf);
+//  free (playbuf);
 
   exit(0);
 }

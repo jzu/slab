@@ -1,4 +1,4 @@
-- Write a shimmer reverb effect, fixed-point FFT being handled by a thread
+- Change the reverse FFT to an additive synth using multiple sinewaves
 - Create another input thread to handle STDIN
 - Test different soundcards: Behringer UFO202 and others
 - Test on a DockStar
