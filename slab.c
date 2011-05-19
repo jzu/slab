@@ -80,9 +80,7 @@
 
 short sinus [SHRT_MAX];              // 1/4 wave for sin() integer simulation 
 
-short procbuf1 [INITIAL_LENGTH],     // Ring buffers
-      procbuf2 [INITIAL_LENGTH];
-short *procbuf,                      // Pointers to ring buffers
+short procbuf [INITIAL_LENGTH],      // Pointers to ring buffers
       *procbend,
       *tempbend;
 int   asize,                         // ALSA stereo buffer size
@@ -100,6 +98,7 @@ pthread_t sthread;                   // Joystick thread
 snd_pcm_uframes_t frames = FRAMES;
 snd_pcm_t *handle_rec,
           *handle_play;
+
 short *recbuf,                       // ALSA I/O buffers
       *playbuf;
 
@@ -107,7 +106,7 @@ long  shimbuf [N_WAVE];              // Mix buffer
 int   shidx = 0;                     // Index in a buffer
 
 int   spl;                           // Sample offset in a mono frame
-int   s = 0;                         // Frame offset in procbuf
+int   fop = 0;                       // Frame offset in procbuf
 
 int   shimmer_flag=1;
 int   flange_flag=0;
@@ -122,9 +121,9 @@ void  set_led (char *led, int i);
 short push_pull (short sample);
 void  debugsig (int signum);
 
-short debugbuf1[100000],
-      debugbuf2[100000],
-      debugbuf3[100000];
+short debugbuf1 [100000],
+      debugbuf2 [100000],
+      debugbuf3 [100000];
 
 /****************************************************************************
  * Init, main read/process/write loop
@@ -139,16 +138,12 @@ int main (int argc, char **argv) {
   snd_pcm_hw_params_t *params_rec,
                       *params_play;
   int gate;                          // Noise detector
-//  int dir;                           // Result for ALSA operations
   unsigned int rate = 44100;         // Sample rate
-//  unsigned int val;                  // Sample frequency
-
 
   if ((argc > 1) && (!strcmp(argv[1], "-d")))
     debug = 1;
-      
 
-  /* Sinus table (*10000) for push_pull algorithm */
+  /* Sinus table (*10000) for push_pull algorithm - to be replaced */
 
   for (i=0; i<32768; i++)
     sinus [i] = (short)(sin ((float)i / 20860.0)*20000);//10000);
@@ -167,14 +162,9 @@ int main (int argc, char **argv) {
 
   signal (SIGINT, debugsig);
 
-  // Processing ring buffer init
-
-  procbuf   = procbuf1;
-
   // ALSA init
 
   asize = frames * 4;                // 2 bytes/sample, 2 channels 
-//  val  = 44100;                      // Should be 48k here, which doesn't work
 
   recbuf  = (short *)malloc (asize);
   playbuf = (short *)malloc (asize);
@@ -230,7 +220,7 @@ int main (int argc, char **argv) {
   if (rc < 0) {
     ERROR (stderr,
            "play - unable to open pcm device: %s\n",
-             snd_strerror (rc));
+           snd_strerror (rc));
     exit (1);
   }
 
@@ -286,12 +276,12 @@ int main (int argc, char **argv) {
 
     /* Store capture buffer content in ring buffer */
 
-    s += ssize;
-    if (s > buflen - ssize)
-      s = 0;
+    fop += ssize;
+    if (fop > buflen - ssize)
+      fop = 0;
     
-    for (i=0; i<bsize; i++)
-      procbuf [s + i/2] = recbuf [i];        // Down by the jetty
+    for (i= 0; i < bsize; i++)
+      procbuf [fop+i/2] = recbuf [i];        // Down by the jetty
 
 
     /* Effects */
@@ -300,11 +290,11 @@ int main (int argc, char **argv) {
 
     gate = 1;
     for (spl = 0; spl < ssize; spl++)
-      if (abs (procbuf [s + spl]) > 700) 
+      if (abs (procbuf [fop+spl]) > 700) 
         gate = 0;           // Don't attenuate the buffer if there's a signal
     if (gate)
       for (spl = 0; spl < ssize; spl++)
-        procbuf [s + spl] = procbuf [s + spl] >> 1;
+        procbuf [fop+spl] = procbuf [fop+spl] >> 1;
 
     // 2) distortion - apply a non-linear function to signal
 
@@ -312,7 +302,7 @@ int main (int argc, char **argv) {
       joydis = (joydis < 0) ? 0 : (joydis > 4) ? 4 : joydis;
       for (spl = 0; spl < ssize; spl++)
         for (d = 0; d < joydis ; d++)
-          procbuf [s + spl] = push_pull (procbuf [s + spl]);
+          procbuf [fop+spl] = push_pull (procbuf [fop+spl]);
 
     // 3) flanger - mix with a few samples behind
 
@@ -320,18 +310,18 @@ int main (int argc, char **argv) {
       if (fl_val != joymod)                  // Aliasing joystick steps
         fl_val > joymod ? fl_val-- : fl_val++ ;
       for (spl = 0; spl < ssize; spl++) 
-        procbuf [s + spl] = (short)(
-                ((int)get_sample (procbuf+s + spl) +
-                 (int)get_sample (procbuf+s + spl - fl_val))>>1);
+        procbuf [fop+spl] = (short)(
+                ((int)get_sample (procbuf+fop + spl) +
+                 (int)get_sample (procbuf+fop + spl - fl_val))>>1);
     }
 
     // 4) delay (-6 dB) - 50 times more samples behind
 
     if (delay_flag)
       for (spl = 0; spl < ssize; spl++) 
-        procbuf [s + spl] = (short)(
-                ((int)get_sample (procbuf+s + spl) + 
-                 (int)(get_sample (procbuf+s + spl - joymod*50) >> 1))/1.5);
+        procbuf [fop+spl] = (short)(
+                ((int)get_sample (procbuf+fop + spl) + 
+                 (int)(get_sample (procbuf+fop + spl - joymod*50) >> 1))/1.5);
 
 
     /* Back to stereo - Shimmer generator integrated here */
@@ -339,12 +329,12 @@ int main (int argc, char **argv) {
     for (i = 0; i < ssize; i++)
       if (shimmer_flag)
         playbuf [i*2]   = 
-        playbuf [i*2+1] = procbuf [s+i] 
+        playbuf [i*2+1] = procbuf [fop+i] 
                           + (short)(shimbuf [(shidx > N_WAVE)
                                              ? shidx = 0
                                              : shidx++] >> RSHFT);
       else
-        playbuf [i*2] = playbuf [i*2+1] = procbuf [s+i];
+        playbuf [i*2] = playbuf [i*2+1] = procbuf [fop+i];
 
     /* Write playback buffer content to device */
 
@@ -415,9 +405,9 @@ void *shimmer ()
       memset (imagbuf, 0, N_WAVE*2);
   
       for (i = 0; i < N_WAVE; i++)                      // Copy data
-        pr [0][i] = procbuf [(s + spl - N_WAVE + i < 0)
-                             ? s + spl - N_WAVE + i + INITIAL_LENGTH
-                             : s + spl - N_WAVE + i];
+        pr [0][i] = procbuf [(fop + spl - N_WAVE + i < 0)
+                             ? fop + spl - N_WAVE + i + INITIAL_LENGTH
+                             : fop + spl - N_WAVE + i];
 
       fix_fft (pr [0], imagbuf, 0, LOG2_N_WAVE);        // Integer FFT
 
@@ -519,7 +509,12 @@ void *joystick ()
         else {
           DEBUG ("ev.number=%d\n", ev.number);
         }
-        if ((ev.value == 1) && (oldev.value == 1) && (((ev.number == SW_FLG) && (oldev.number == SW_DLY)) || ((ev.number == SW_DLY) && (oldev.number == SW_FLG)))) {
+        if ((ev.value == 1)                            // 2-switch kill
+            && (oldev.value == 1) 
+            && (((ev.number == SW_FLG) 
+                 && (oldev.number == SW_DLY)) 
+                || ((ev.number == SW_DLY) 
+                 && (oldev.number == SW_FLG)))) {
           set_led (LED_READY, 0);
           set_led (LED_DISK1, 0);
           set_led (LED_DISK2, 0);
