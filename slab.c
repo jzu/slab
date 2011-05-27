@@ -50,10 +50,11 @@
 // Shimmer/FFT
 
 #define HALFLEN (N_WAVE>>1)
-#define DECAY 500
-#define LSHFT 7         /* More precision */
-#define RSHFT 10        /* Back, compensating for successive additions */
-
+#define DECAY  500
+#define LSHFT  7        /* More precision */
+#define RSHFT  10       /* Back, compensating for successive additions */
+#define NBSINS 7        /* I'm all for tradition */
+#define DECREASE 1
 // Switches
 
 #define SW_FLG 2
@@ -105,6 +106,12 @@ short *recbuf,                       // ALSA I/O buffers
 long  shimbuf [N_WAVE];              // Mix buffer
 int   shidx = 0;                     // Index in a buffer
 
+struct WaveCtl {
+  short gain;                        // Decreases regularly
+  short step;                        // Current point in waveform
+  short period;                      // Function of frequency
+} wctl [NBSINS];
+
 int   spl;                           // Sample offset in a mono frame
 int   fop = 0;                       // Frame offset in procbuf
 
@@ -117,8 +124,9 @@ void  swapbufs ();
 short get_sample (short *p);
 void  *joystick ();
 void  *shimmer ();
-void  set_led (char *led, int i);
+short synth();
 short push_pull (short sample);
+void  set_led (char *led, int i);
 void  debugsig (int signum);
 
 short debugbuf1 [100000],
@@ -148,6 +156,10 @@ int main (int argc, char **argv) {
   for (i=0; i<32768; i++)
     sinus [i] = (short)(sin ((float)i / 20860.0)*20000);//10000);
 
+  /* Shimmer init */
+  memset (&wctl, 0, sizeof (wctl [NBSINS]));
+  for (i=0; i<NBSINS; i++)
+    wctl [i].gain = 0;
   /* LEDs off */
 
   set_led (LED_DISK1, 0);
@@ -328,11 +340,7 @@ int main (int argc, char **argv) {
 
     for (i = 0; i < ssize; i++)
       if (shimmer_flag)
-        playbuf [i*2]   = 
-        playbuf [i*2+1] = procbuf [fop+i] 
-                          + (short)(shimbuf [(shidx > N_WAVE)
-                                             ? shidx = 0
-                                             : shidx++] >> RSHFT);
+        playbuf [i*2] = playbuf [i*2+1] = procbuf [fop+i] + synth ();
       else
         playbuf [i*2] = playbuf [i*2+1] = procbuf [fop+i];
 
@@ -382,72 +390,73 @@ short get_sample (short *p) {
  *
  * Separate thread
  * Integer FFT and filtering 
- * shimbuf[] contains the processed signal, shifted in longs for precision
- * A time-domain aliasing cancellation mechanism using overlapping triangle 
- * windows and triple buffering prevents clicks and flattens the envelope
+ * wctl[] is an array of parameters defining sines to be synthetized
  ****************************************************************************/
 
 void *shimmer ()
 {
-  short realbuf [3][N_WAVE];           // FFT buffers (new, old, older)
-  short *pr [4];                       // Ptrs to realbuf[], 3 really used
-  short imagbuf [N_WAVE];              // Always zeroed, never used
+  short realbuf [N_WAVE];       // FFT buffer
+  short imagbuf [N_WAVE];       // Always zeroed, never used
   int   i,
         max,
-        min;
-
-  pr [0] = realbuf [0];                // New - receives data from procbuf
-  pr [1] = realbuf [1];                // Old
-  pr [2] = realbuf [2];                // Older
+        mini,
+        found;
 
   while (1) {
     if (shimmer_flag) {
       memset (imagbuf, 0, N_WAVE*2);
   
-      for (i = 0; i < N_WAVE; i++)                      // Copy data
-        pr [0][i] = procbuf [(fop + spl - N_WAVE + i < 0)
-                             ? fop + spl - N_WAVE + i + INITIAL_LENGTH
-                             : fop + spl - N_WAVE + i];
+      for (i = 0; i < N_WAVE; i++)                         // Copy data
+        realbuf [i] = procbuf [(fop + spl - N_WAVE + i < 0)
+                              ? fop + spl - N_WAVE + i + INITIAL_LENGTH
+                              : fop + spl - N_WAVE + i];
 
-      fix_fft (pr [0], imagbuf, 0, LOG2_N_WAVE);        // Integer FFT
+      fix_fft (realbuf, imagbuf, 0, LOG2_N_WAVE);          // Integer FFT
 
-      for (i = 1, max = 0; i < N_WAVE/2; i++)           // Find max in freqs
-        if (abs (pr [0][i]) > max)
-          max = abs (pr [0][i]);
-      min = max / 4;
+      for (i = 1, max = 0 ; i < N_WAVE/2; i++)             // Find max in freqs
+        if (abs (realbuf [i]) > max)
+          max = i;
 
-      for (i = N_WAVE/4 - 1; i > 0; i--) {
-        if (pr [0][i] < min)                            // Ditch low values
-          pr [0][i] = 0;
-        pr [0][i*2] = pr [2][i];                        // Octave(s) up
-        pr [0][i*4] = pr [2][i];
-        pr [0][i] = 0;                                  // Fundamental off
+      for (i = 0, mini = SHRT_MAX, found = 0; 
+           i < NBSINS; 
+           i++) {
+        if (wctl [i].gain < mini)
+          mini = i;
+        if (wctl [i].period == max)
+          found = i;
       }
-      for (i = 1; i < N_WAVE/2; i++)                    // Mirror frequencies
-        pr [0][N_WAVE-i] = pr [0][i];                   // with a twist -
-                                                        // should be N_WAVE-i-1
-
-      fix_fft (pr [0], imagbuf, 1, LOG2_N_WAVE);        // Reverse FFT
-  
-      for (i = 0; i < HALFLEN; i++)                     // TDAC (left half)
-        shimbuf [i] = (shimbuf [i] * (DECAY-1)) / DECAY
-                      + (1 << LSHFT) - (i << LSHFT) / HALFLEN
-                      + ((long)(pr [2][i+HALFLEN]) << LSHFT)
-                      + ((i << LSHFT) / HALFLEN)
-                      + ((long)(pr [1][i]) << LSHFT);
-      for (i = HALFLEN; i < N_WAVE; i++)                // TDAC (right half)
-        shimbuf [i] = (shimbuf [i] * (DECAY-1)) / DECAY
-                      + (2 << LSHFT) - (i << LSHFT) / HALFLEN 
-                      + ((long)(pr [1][i]) << LSHFT)
-                      + ((i << LSHFT) / HALFLEN - (1 << LSHFT))
-                      + ((long)(pr [0][i-HALFLEN]) << LSHFT);
-
-     pr [1] = pr [0];                                   // Let's roll
-     pr [2] = pr [1];
-     pr [3] = pr [2];
-     pr [0] = pr [3];
+      if (found)                                           // Replace existing
+        wctl [found].gain = abs (realbuf [max]);
+      else {                                               // Replace weakest
+        wctl [mini].period = max;
+        wctl [mini].gain   = abs (realbuf [max]);
+      }
     }
   }
+}
+
+
+/**************************************************************************** 
+ * synth()
+ *
+ * Generates one audio sample using 0 to NBSINS sinewaves
+ ****************************************************************************/
+
+short synth () 
+{
+  long shim = 0;
+  int i;
+
+  for (i = 0; i < NBSINS; i++)
+    if (wctl [i].gain > 0) {
+      shim += (long) Sinewave [wctl [i].step] * (long) wctl [i].gain;
+      wctl [i].gain -= DECREASE;
+      if (wctl [i].gain < 0) 
+        wctl [i].gain = 0;
+      if ((wctl [i].step += wctl [i].period) > buflen)
+        wctl [i].step -= buflen;
+    }
+    return (short) (shim >> 11);  // 11 = sizeof short + Log2 NBSINS
 }
 
 
@@ -526,6 +535,7 @@ void *joystick ()
     oldev.value = ev.value; oldev.number = ev.number;  // FIXME kludge
   }
 }
+
 
 /**************************************************************************** 
  * push_pull()
