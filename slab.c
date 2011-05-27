@@ -417,7 +417,7 @@ void *shimmer ()
         if (abs (realbuf [i]) > max)
           max = i;
 
-      for (i = 0, mini = SHRT_MAX, found = 0; 
+      for (i = 0, mini = N_WAVE, found = 0; 
            i < NBSINS; 
            i++) {
         if (wctl [i].gain < mini)
@@ -453,7 +453,7 @@ short synth ()
       wctl [i].gain -= DECREASE;
       if (wctl [i].gain < 0) 
         wctl [i].gain = 0;
-      if ((wctl [i].step += wctl [i].period) > buflen)
+      if ((wctl [i].step += wctl [i].period) > N_WAVE)
         wctl [i].step -= buflen;
     }
     return (short) (shim >> 11);  // 11 = sizeof short + Log2 NBSINS
