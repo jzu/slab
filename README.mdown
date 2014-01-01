@@ -7,13 +7,14 @@ Real-time audio processing
 
 Copyright (C) Jean Zundel <jzu@free.fr> 2010-2013 
 
-slab is an evolutive guitar effect designed for the Linksys NSLU2 running
-GNU/Linux, but it works on any ALSA-based architecture like the Raspberry Pi. 
+slab is an evolutive guitar effect designed at first for the Linksys NSLU2 
+running GNU/Linux, but it works on any ALSA-based architecture like the 
+Raspberry Pi. 
 It is licensed under the GNU GPL v3.
 
 This version gives a tremolo/chopper effect where the frequency and the
 intensity are hard-coded.  I use it with a Raspberry Pi which sits on my
-pedalboard, connected to a C-Sound el-cheapo USB soundcard. The effect is
+pedalboard, connected to a 3D Sound el-cheapo USB soundcard. The effect is
 always on, and I built a small box with two female guitar jacks, two small
 audio jacks, and a momentary switch.  The soundcard is quite awful, but I
 don't care because I always use the effect after a fuzz. Among the
@@ -59,7 +60,7 @@ create ramdisks for `/var/log` and `/var/run` directories in `/etc/fstab`
     none            /var/log  ramfs   size=1M  0 0
 
 The `/etc/rc.local` file needs these lines, the `amixer` part being specific
-to the C-Sound interface.
+to the C-Sound interface in order to adjust input and output levels.
 
     mkdir /run/lock
     mkdir /run/shm
