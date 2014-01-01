@@ -1,5 +1,1 @@
-- Optional config file (/etc/slab.conf) 
-- Change the reverse FFT to an additive synth using multiple sinewaves
-- Create another input thread to handle STDIN
-- Test different soundcards: Behringer UFO202 and others
-- Test on a DockStar
+- Add one or two controls
