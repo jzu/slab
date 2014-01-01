@@ -38,8 +38,6 @@
 #include <math.h>
 #include <signal.h>
 
-#include "fix_fft.h"
-
 #define FRAMES 44        /* Don't ask */
 
 #define INITIAL_LENGTH 0x100000
@@ -47,14 +45,6 @@
 #define DEBUG if (debug) printf
 #define ERROR if (debug) fprintf
 
-// Shimmer/FFT
-
-#define HALFLEN (N_WAVE>>1)
-#define DECAY  500
-#define LSHFT  7        /* More precision */
-#define RSHFT  10       /* Back, compensating for successive additions */
-#define NBSINS 7        /* I'm all for tradition */
-#define DECREASE 1
 // Switches
 
 #define SW_FLG 2
@@ -78,6 +68,13 @@
 #define LED_READY  "/sys/class/leds/nslu2:green:ready"
 #define LED_STATUS "/sys/class/leds/nslu2:red:status"
 
+// Tremolo
+
+#define MAXTREM   32766
+#define TREMSPEED 14
+#define TRSHLDUP  (MAXTREM*3)/4
+#define TRSHLDDN  MAXTREM/4
+#define TREMGAIN  2
 
 short sinus [SHRT_MAX];              // 1/4 wave for sin() integer simulation 
 
@@ -103,27 +100,21 @@ snd_pcm_t *handle_rec,
 short *recbuf,                       // ALSA I/O buffers
       *playbuf;
 
-long  shimbuf [N_WAVE];              // Mix buffer
-int   shidx = 0;                     // Index in a buffer
-
-struct WaveCtl {
-  short gain;                        // Decreases regularly
-  short step;                        // Current point in waveform
-  short period;                      // Function of frequency
-} wctl [NBSINS];
 
 int   spl;                           // Sample offset in a mono frame
 int   fop = 0;                       // Frame offset in procbuf
 
-int   shimmer_flag=1;
+int   tremolo_flag=1;                // Hard-coded in this branch - no controls
 int   flange_flag=0;
 int   delay_flag=0;
 int   dist_flag=0;
 
+int   trem=0;
+int   sign=TREMSPEED;
+
 void  swapbufs ();
 short get_sample (short *p);
 void  *joystick ();
-void  *shimmer ();
 short synth();
 short push_pull (short sample);
 void  set_led (char *led, int i);
@@ -151,15 +142,11 @@ int main (int argc, char **argv) {
   if ((argc > 1) && (!strcmp(argv[1], "-d")))
     debug = 1;
 
-  /* Sinus table (*10000) for push_pull algorithm - to be replaced */
+  /* Sinus table (*20000) for push_pull algorithm - to be replaced */
 
   for (i=0; i<32768; i++)
     sinus [i] = (short)(sin ((float)i / 20860.0)*20000);//10000);
 
-  /* Shimmer init */
-  memset (&wctl, 0, sizeof (wctl [NBSINS]));
-  for (i=0; i<NBSINS; i++)
-    wctl [i].gain = 0;
   /* LEDs off */
 
   set_led (LED_DISK1, 0);
@@ -170,7 +157,6 @@ int main (int argc, char **argv) {
   /* Let the joystick live its life */
 
   pthread_create (&jthread, NULL, joystick, NULL);
-  pthread_create (&sthread, NULL, shimmer, NULL);
 
   signal (SIGINT, debugsig);
 
@@ -308,7 +294,29 @@ int main (int argc, char **argv) {
       for (spl = 0; spl < ssize; spl++)
         procbuf [fop+spl] = procbuf [fop+spl] >> 1;
 
-    // 2) distortion - apply a non-linear function to signal
+    // 2) Tremolo
+
+    if (tremolo_flag)
+      for (spl = 0; spl < ssize; spl++) {
+        if ((procbuf [fop+spl] < TRSHLDUP) &&   /*                 /\  /\    */
+            (procbuf [fop+spl] > TRSHLDDN)) {   /* Wave looks like | | | |   */
+          if (sign > 0)                         /*                   \/  \/  */
+            sign = TRSHLDUP;
+          else
+            sign = TRSHLDDN;
+        }
+        if (trem >= MAXTREM) 
+          sign = -TREMSPEED;
+        if (trem <= 0)
+          sign = +TREMSPEED;
+        trem += sign;
+        procbuf [fop+spl] = (short) (((long) procbuf [fop+spl] 
+                                             * (long) trem) 
+                                      / (MAXTREM));
+        procbuf [fop+spl] *= 2;                    // Inherent volume drop comp
+      }
+
+    // 3) distortion - apply a non-linear function to signal
 
     if (dist_flag)
       joydis = (joydis < 0) ? 0 : (joydis > 4) ? 4 : joydis;
@@ -316,7 +324,7 @@ int main (int argc, char **argv) {
         for (d = 0; d < joydis ; d++)
           procbuf [fop+spl] = push_pull (procbuf [fop+spl]);
 
-    // 3) flanger - mix with a few samples behind
+    // 4) flanger - mix with a few samples behind
 
     if (flange_flag) {
       if (fl_val != joymod)                  // Aliasing joystick steps
@@ -327,7 +335,7 @@ int main (int argc, char **argv) {
                  (int)get_sample (procbuf+fop + spl - fl_val))>>1);
     }
 
-    // 4) delay (-6 dB) - 50 times more samples behind
+    // 5) delay (-6 dB) - 50 times more samples behind
 
     if (delay_flag)
       for (spl = 0; spl < ssize; spl++) 
@@ -336,13 +344,10 @@ int main (int argc, char **argv) {
                  (int)(get_sample (procbuf+fop + spl - joymod*50) >> 1))/1.5);
 
 
-    /* Back to stereo - Shimmer generator integrated here */
+    /* Back to stereo - Shimmer would be managed here */
 
     for (i = 0; i < ssize; i++)
-      if (shimmer_flag)
-        playbuf [i*2] = playbuf [i*2+1] = procbuf [fop+i] + synth ();
-      else
-        playbuf [i*2] = playbuf [i*2+1] = procbuf [fop+i];
+      playbuf [i*2] = playbuf [i*2+1] = procbuf [fop+i];
 
     /* Write playback buffer content to device */
 
@@ -382,81 +387,6 @@ short get_sample (short *p) {
   while ((int)p >= (int)(procbuf+buflen))
     p -= buflen;
   return *p;
-}
-
-
-/**************************************************************************** 
- * shimmer()
- *
- * Separate thread
- * Integer FFT and filtering 
- * wctl[] is an array of parameters defining sines to be synthetized
- ****************************************************************************/
-
-void *shimmer ()
-{
-  short realbuf [N_WAVE];       // FFT buffer
-  short imagbuf [N_WAVE];       // Always zeroed, never used
-  int   i,
-        max,
-        mini,
-        found;
-
-  while (1) {
-    if (shimmer_flag) {
-      memset (imagbuf, 0, N_WAVE*2);
-  
-      for (i = 0; i < N_WAVE; i++)                         // Copy data
-        realbuf [i] = procbuf [(fop + spl - N_WAVE + i < 0)
-                              ? fop + spl - N_WAVE + i + INITIAL_LENGTH
-                              : fop + spl - N_WAVE + i];
-
-      fix_fft (realbuf, imagbuf, 0, LOG2_N_WAVE);          // Integer FFT
-
-      for (i = 1, max = 0 ; i < N_WAVE/2; i++)             // Find max in freqs
-        if (abs (realbuf [i]) > max)
-          max = i;
-
-      for (i = 0, mini = N_WAVE, found = 0; 
-           i < NBSINS; 
-           i++) {
-        if (wctl [i].gain < mini)
-          mini = i;
-        if (wctl [i].period == max)
-          found = i;
-      }
-      if (found)                                           // Replace existing
-        wctl [found].gain = abs (realbuf [max]);
-      else {                                               // Replace weakest
-        wctl [mini].period = max;
-        wctl [mini].gain   = abs (realbuf [max]);
-      }
-    }
-  }
-}
-
-
-/**************************************************************************** 
- * synth()
- *
- * Generates one audio sample using 0 to NBSINS sinewaves
- ****************************************************************************/
-
-short synth () 
-{
-  long shim = 0;
-  int i;
-
-  for (i = 0; i < NBSINS; i++)
-    if (wctl [i].gain > 0) {
-      shim += (long) Sinewave [wctl [i].step] * (long) wctl [i].gain;
-      wctl [i].gain -= DECREASE;
-      if (wctl [i].gain < 0) 
-        wctl [i].gain = 0;
-      if ((wctl [i].step += wctl [i].period) > N_WAVE)
-        wctl [i].step -= buflen;
-    }
-    return (short) (shim >> 11);  // 11 = sizeof short + Log2 NBSINS
 }
 
 
@@ -574,7 +504,7 @@ void write_to_file (const char *f, const char *s) {
  * set_led()
  *
  * Switch LEDs on/off 
- * Needs to be run as root to work, else nothing happens
+ * Needs to be run as root on an NSLU2 to work, else nothing happens
  * *led  Dirname (/sys/classes/leds/foo/)
  * i     Value   (0||!0)
  ****************************************************************************/

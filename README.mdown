@@ -1,21 +1,26 @@
 SLug Audio Blaster
 ==================
 
-Version 1.0
+Version 1.0 - TRasp Edition (Tremolo on Raspberry Pi)
 
 Real-time audio processing
 
-Copyright (C) Jean Zundel <jzu@free.fr> 2010 
+Copyright (C) Jean Zundel <jzu@free.fr> 2010-2013 
 
 slab is an evolutive guitar effect designed for the Linksys NSLU2 running
-GNU/Linux, but it works on any ALSA-based architecture. It is licensed under
-the GNU GPL v3.
+GNU/Linux, but it works on any ALSA-based architecture like the Raspberry Pi. 
+It is licensed under the GNU GPL v3.
 
-An attempt at creating a shimmer reverb effect is currently under construction
-but THIS DOESN'T WORK YET. Well, it works more or less, but the results are not
-what was expected. This code is anyway HIGHLY EXPERIMENTAL, PRE-ALPHA, you name
-it. An integer Fourier transform, fix\_fft, has been added. It derives from an
-old MS-DOS program and has been modified to experiment with various data sizes.
+This version gives a tremolo/chopper effect where the frequency and the
+intensity are hard-coded.  I use it with a Raspberry Pi which sits on my
+pedalboard, connected to a C-Sound el-cheapo USB soundcard. The effect is
+always on, and I built a small box with two female guitar jacks, two small
+audio jacks, and a momentary switch.  The soundcard is quite awful, but I
+don't care because I always use the effect after a fuzz. Among the
+interfaces I tested, Behringer USB soundcards like the UCA202 give better audio
+results but take more pedalboard estate, there are no mixer controls, and the
+audio level is way too low. The ART USB Phono Plus is quite correct but a bit
+on the heavy side.
 
 
 COMPILATION
@@ -27,13 +32,6 @@ libraries (+devel), and gcc.
 
 TESTING
 -------
-
-Running it as root allows to use the Slug's LEDs.
-
-This program needs an USB joystick - or something similar, like a converted wah
-controller - to operate. It currently manages two potentiometers and four
-switches, but there's room for easy expansion. You will need to tinker with
-`#define`s to map the physical controls with the desired effects.
 
 The `-d` option ouputs debug messages (ALSA errors and joystick events).
 
@@ -51,41 +49,24 @@ which will ensure that `init(8)` restarts the program when it is stopped.
 `telinit q` will re-read the inittab file.
 
 Mounting the `/` filesystem read-only prevents data corruption, but you have to
-create ramdisks for `/tmp` and `/var/run` directories in `/etc/fstab`.
+create ramdisks for `/var/log` and `/var/run` directories in `/etc/fstab` 
+(`/var/run/` is in fact a symlink to `/run`).
 
-    /dev/sda2  /         ext3    ro         0 0
-    (...)
-    none       /tmp      ramfs   size=512k  0 0
-    none       /var/run  ramfs   size=512k  0 0
+    proc            /proc     proc    defaults 0 0
+    /dev/mmcblk0p1  /boot     vfat    ro       0 0
+    /dev/mmcblk0p2  /         ext4    ro       0 0
+    none            /var/run  ramfs   size=1M  0 0
+    none            /var/log  ramfs   size=1M  0 0
 
-Activating eth0 mysteriously fails with readonly filesystems, so 
-this kludge in `/etc/rc.local` temporarily switches to `rw`,
-`ifconfig`s eth0, then switches back to `ro`.
+The `/etc/rc.local` file needs these lines, the `amixer` part being specific
+to the C-Sound interface.
 
-    mount /dev/sda2 / -o rw,remount
-    ifconfig eth0 192.168.0.106
-    sleep 1                         # Yes, you really need it. Whatever.
-    mount /dev/sda2 / -o ro,remount
-
-
-CAVEAT
-------
-
-Enormous hiss! The el-cheapo USB soundcard I used for my tests is to 
-blame. The "noise gate" effect helps only to a point.
-
-When the program starts, it doesn't know the position of pots, since they 
-cannot be read: events are pushed from the controller to the computer. 
-Since this kind of device is seldom restarted during a session, this
-behaviour is minor, but sometimes surprising.
-
-Any external process/event affects ALSA management and creates an 
-unwanted delay. You have to stop the program, which will be restarted
-by init if `/etc/inittab` is set up accordingly.
-
-Hence, Debian is perfect for programming/compiling/debugging, but 
-a stripped-down distro might be more adequate for everyday use.
-See OpenEmbedded (http://wiki.openembedded.net/) and others.
+    mkdir /run/lock
+    mkdir /run/shm
+    
+    amixer set "PCM" 33
+    amixer set "Mic" 4         
+    amixer set "Auto Gain Control" off
 
 
 <!-- Convert to HTML using markdown -->
