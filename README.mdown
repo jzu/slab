@@ -60,7 +60,7 @@ create ramdisks for `/var/log` and `/var/run` directories in `/etc/fstab`
     none            /var/log  ramfs   size=1M  0 0
 
 The `/etc/rc.local` file needs these lines, the `amixer` part being specific
-to the C-Sound interface in order to adjust input and output levels.
+to the 3D Sound interface in order to adjust input and output levels.
 
     mkdir /run/lock
     mkdir /run/shm
