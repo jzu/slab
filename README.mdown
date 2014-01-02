@@ -1,7 +1,7 @@
 SLug Audio Blaster
 ==================
 
-Version 1.0 - TRasp Edition (Tremolo on Raspberry Pi)
+Version 1.0 - T-Rasp Edition (Tremolo on Raspberry Pi)
 
 Real-time audio processing
 
