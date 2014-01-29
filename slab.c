@@ -74,7 +74,7 @@
 #define TREMSPEED 14
 #define TRSHLDUP  (MAXTREM*3)/4
 #define TRSHLDDN  MAXTREM/4
-#define TREMGAIN  2
+#define TREMGAIN  3
 
 short sinus [SHRT_MAX];              // 1/4 wave for sin() integer simulation 
 
@@ -313,7 +313,7 @@ int main (int argc, char **argv) {
         procbuf [fop+spl] = (short) (((long) procbuf [fop+spl] 
                                              * (long) trem) 
                                       / (MAXTREM));
-        procbuf [fop+spl] *= 2;                    // Inherent volume drop comp
+        procbuf [fop+spl] *= TREMGAIN;              // Volume drop compensation
       }
 
     // 3) distortion - apply a non-linear function to signal
